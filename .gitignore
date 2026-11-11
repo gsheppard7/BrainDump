@@ -1,0 +1,19 @@
+.env
+.env.*
+!.env.example
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+apps/api/data/
+
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+coverage/

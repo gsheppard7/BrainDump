@@ -1,0 +1,18 @@
+[
+  {
+    "title": "Weekly review — Nov 2",
+    "body": "Wins: shipped the onboarding redesign, finally fixed the flaky CI job (it was a timezone bug in the date fixtures). Ran 3x this week.\n\nMisses: didn't call the insurance company about the windshield claim. Inbox at 140.\n\nNext week: book dentist, finish the Q4 planning doc draft by Wednesday, prep questions for the 1:1 with Dana about the platform team reorg."
+  },
+  {
+    "title": "Ideas for Mom's 70th",
+    "body": "She keeps mentioning the lake house from when we were kids — maybe rent a cabin at Lake Tahoe for a long weekend in June and invite the cousins.\n\nGift ideas: a framed print of the old family photo (Aunt Rosa has the original), a pottery class together, or the Le Creuset dutch oven in 'Sea Salt' she pointed at last Christmas.\n\nBudget split with Marco: roughly $400 each."
+  },
+  {
+    "title": "Podcast notes: deep work and attention",
+    "body": "Key idea: attention residue — switching tasks leaves part of your attention on the previous task, so context switching costs more than it feels like.\n\nTactics mentioned: time-block the calendar the night before, batch shallow work (email, Slack) into two windows a day, and keep a 'shutdown ritual' at the end of the workday.\n\nTry: no Slack before 10am for two weeks and see if the morning writing block gets better."
+  },
+  {
+    "title": "Home network password rotation reminder",
+    "body": "Rotate the guest Wi-Fi password every quarter. Last rotated: August. The admin credentials live in the password manager under 'Router — Eero', never in notes."
+  }
+]

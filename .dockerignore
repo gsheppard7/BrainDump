@@ -1,0 +1,8 @@
+**/node_modules
+**/dist
+**/.venv
+**/data
+.env
+.git
+apps/api
+samples
