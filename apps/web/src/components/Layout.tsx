@@ -21,6 +21,9 @@ export function Layout() {
             <NavLink to="/" end className={navClass}>
               Capture
             </NavLink>
+            <NavLink to="/ask" className={navClass}>
+              Ask
+            </NavLink>
             <NavLink to="/library" className={navClass}>
               Library
             </NavLink>
@@ -30,6 +33,18 @@ export function Layout() {
               <span className="text-rose-700">API unreachable</span>
             ) : meta.data && !meta.data.database ? (
               <span className="text-rose-700">Database unavailable</span>
+            ) : meta.data && meta.data.ai.provider !== 'none' ? (
+              <span
+                className="flex items-center gap-1.5 text-stone-500"
+                title={meta.data.ai.message ?? `${meta.data.ai.chat_model} · ${meta.data.ai.embedding_model}`}
+              >
+                <span
+                  className={`size-2 rounded-full ${meta.data.capabilities.grounded_chat ? 'bg-emerald-500' : 'bg-amber-500'}`}
+                />
+                <span className="sr-only whitespace-nowrap sm:not-sr-only">
+                  {meta.data.capabilities.grounded_chat ? 'Local AI ready' : 'Local AI offline'}
+                </span>
+              </span>
             ) : null}
           </div>
         </div>

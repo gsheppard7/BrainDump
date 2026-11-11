@@ -24,6 +24,7 @@ def configure_logging(level: str) -> None:
     logging.basicConfig(level=level, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     # The default access log includes query strings (i.e. search terms). Ours doesn't.
     logging.getLogger("uvicorn.access").disabled = True
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 @asynccontextmanager

@@ -3,6 +3,7 @@ import { BrowserRouter, Link, Route, Routes } from 'react-router-dom'
 
 import { ApiError } from './api'
 import { Layout } from './components/Layout'
+import { AskPage } from './pages/AskPage'
 import { CapturePage } from './pages/CapturePage'
 import { LibraryPage } from './pages/LibraryPage'
 import { SourcePage } from './pages/SourcePage'
@@ -34,6 +35,7 @@ export default function App() {
         <Routes>
           <Route element={<Layout />}>
             <Route index element={<CapturePage />} />
+            <Route path="ask" element={<AskPage />} />
             <Route path="library" element={<LibraryPage />} />
             <Route path="sources/:id" element={<SourcePage />} />
             <Route path="*" element={<NotFound />} />

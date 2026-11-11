@@ -37,12 +37,13 @@ Postgres 16 + pgvector (Docker Compose)
    `ts_headline`), grouped by source, returning the best-matching chunk + highlighted
    snippet segments (no HTML injection).
 
-### Seams (interfaces only, not wired to endpoints)
+### AI layer (added in M2)
 
-- `app/ai/embeddings.py` — `EmbeddingProvider` protocol and a config-driven factory
-  (`EMBEDDING_PROVIDER=none` → keyword-only). `chunks.embedding vector(1536)` column exists.
-- `app/ai/memory.py` — `MemoryExtractor` protocol + `MemoryCandidate`.
-- `app/ai/answering.py` — `GroundedAnswerer` protocol + `Answer` / `Citation`.
+- `app/ai/embeddings.py`, `app/ai/chat.py` — provider protocols with Ollama implementations,
+  chosen by `app/ai/registry.py` from `EMBEDDING_PROVIDER` / `CHAT_PROVIDER`.
+- `app/services/indexing.py` (background embeddings), `retrieval.py` (hybrid + RRF),
+  `ask.py` (grounded, cited answers).
+- `app/ai/memory.py` — `MemoryExtractor` protocol only; not wired up until M3.
 
 ### Privacy & safety
 
@@ -58,6 +59,9 @@ Postgres 16 + pgvector (Docker Compose)
 - [x] M0 — monorepo, Docker Compose, migrations, health endpoint, CI-able lint/test commands
 - [x] M1 — capture (note + upload), validation, dedup, worker, library, search, detail view,
       status states, seed data, tests
-- [ ] M2 — embeddings + hybrid retrieval (see `docs/next-increment.md`)
-- [ ] M3 — cited Q&A over retrieved chunks
-- [ ] M4 — user-reviewed memories
+- [x] M2 — local embeddings, hybrid retrieval, cited Q&A (Ask page)
+- [ ] M2.5 — evaluation set, follow-up questions, date filters
+- [ ] M3 — summaries, topics, user-reviewed memories
+- [ ] M4 — related notes, trends, connections graph
+
+See `docs/next-increment.md`.

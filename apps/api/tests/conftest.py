@@ -11,6 +11,8 @@ _BASE_URL = os.environ.get(
 os.environ["DATABASE_URL"] = _BASE_URL
 os.environ["DATA_DIR"] = str(_TEST_DATA_DIR)
 os.environ["WORKER_ENABLED"] = "false"
+os.environ["EMBEDDING_PROVIDER"] = "none"
+os.environ["CHAT_PROVIDER"] = "none"
 os.environ["LOG_LEVEL"] = "WARNING"
 
 import pytest  # noqa: E402

@@ -1,4 +1,13 @@
-import type { Meta, SearchResponse, SourceDetail, SourceList, SourceStatus, SourceSummary } from './types'
+import type {
+  AskEvent,
+  AskMode,
+  Meta,
+  SearchResponse,
+  SourceDetail,
+  SourceList,
+  SourceStatus,
+  SourceSummary,
+} from './types'
 
 export class ApiError extends Error {
   readonly status: number
@@ -47,6 +56,24 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T
 }
 
+export async function readNdjson(body: ReadableStream<Uint8Array>, onLine: (line: string) => void) {
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    let newline: number
+    while ((newline = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, newline).trim()
+      buffer = buffer.slice(newline + 1)
+      if (line) onLine(line)
+    }
+  }
+  if (buffer.trim()) onLine(buffer.trim())
+}
+
 export interface ListParams {
   status?: SourceStatus
   limit?: number
@@ -77,6 +104,24 @@ export const api = {
 
   retrySource: (id: string) =>
     request<SourceSummary>(`/api/sources/${encodeURIComponent(id)}/retry`, { method: 'POST' }),
+
+  /** Streams newline-delimited JSON events from POST /api/ask. */
+  ask: async (question: string, mode: AskMode, onEvent: (e: AskEvent) => void, signal?: AbortSignal) => {
+    let res: Response
+    try {
+      res = await fetch('/api/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, mode }),
+        signal,
+      })
+    } catch (err) {
+      if (signal?.aborted) return
+      throw err instanceof ApiError ? err : networkError()
+    }
+    if (!res.ok || !res.body) throw toApiError(res.status, await res.text())
+    await readNdjson(res.body, (line) => onEvent(JSON.parse(line) as AskEvent))
+  },
 
   /** XHR instead of fetch so we can report upload progress. */
   uploadFile: (file: File, onProgress?: (fraction: number) => void) =>

@@ -10,6 +10,7 @@ export interface SourceSummary {
   original_filename: string | null
   size_bytes: number
   status: SourceStatus
+  embedding_status: 'pending' | 'done' | null
   error_code: string | null
   error_message: string | null
   char_count: number | null
@@ -52,13 +53,17 @@ export interface SearchHit {
   page: number | null
   rank: number
   match_count: number
+  match_reasons: MatchReason[]
   snippet: SnippetPart[]
 }
 
+export type MatchReason = 'keyword' | 'semantic'
+
 export interface SearchResponse {
   query: string
-  mode: 'keyword'
+  mode: 'keyword' | 'hybrid'
   semantic_available: boolean
+  notice: string | null
   total: number
   query_has_terms: boolean
   hits: SearchHit[]
@@ -76,6 +81,42 @@ export interface Meta {
     grounded_chat: boolean
     memory_extraction: boolean
   }
+  ai: {
+    provider: string
+    location: string
+    embedding_model: string | null
+    chat_model: string | null
+    reachable: boolean
+    message: string | null
+  }
+  index: {
+    ready_sources: number
+    semantic_indexed: number
+    semantic_pending: number
+  }
 }
+
+export type AskMode = 'recall' | 'plan' | 'report' | 'brainstorm'
+
+export interface AskPassage {
+  n: number
+  source_id: string
+  chunk_id: string
+  chunk_ordinal: number
+  page: number | null
+  title: string
+  kind: SourceKind
+  file_type: FileType | null
+  created_at: string
+  excerpt: string
+  match_reasons: MatchReason[]
+}
+
+export type AskEvent =
+  | { type: 'meta'; model: string; location: string; notice: string | null }
+  | { type: 'context'; passages: AskPassage[] }
+  | { type: 'delta'; text: string }
+  | { type: 'done'; citations: number[]; grounded: boolean }
+  | { type: 'error'; message: string }
 
 export const isInFlight = (status: SourceStatus) => status === 'pending' || status === 'processing'

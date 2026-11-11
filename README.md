@@ -2,16 +2,34 @@
 
 A personal second brain. Capture notes and documents, then find them again.
 
-**This iteration (M0–M1):** write a note or upload a PDF / Markdown / plain-text file, watch
-it get processed, browse your library, and **keyword-search** everything with highlighted
-snippets that link straight to the matching passage.
+- **Capture:** write a note or upload a PDF / Markdown / plain-text file and watch it process.
+- **Library:** **hybrid search** — exact words *and* related meaning — with highlighted
+  snippets that link straight to the matching passage.
+- **Ask:** questions, plans, reports, or brainstorms answered from your own notes, with
+  numbered citations back to the exact passages, and "I couldn't find that" when your notes
+  don't cover it.
 
-> **Not yet built:** semantic (embedding) search, Q&A over your documents, and memory
-> extraction. The interfaces exist (`apps/api/app/ai/`) but nothing pretends to work —
-> the UI labels search as *Keyword search*, and `/api/meta` reports these capabilities as
-> `false`. See [`docs/next-increment.md`](docs/next-increment.md).
+All AI runs **locally via [Ollama](https://ollama.com)** — free, and your notes never leave
+your Mac. Without Ollama, everything still works except Ask, and search falls back to
+keyword-only (the UI says so).
 
-## Quick start (Docker — everything)
+> **Not yet built:** memory extraction/review, topics, trends, and the connections graph.
+> See [`docs/next-increment.md`](docs/next-increment.md).
+
+## Local AI setup (once)
+
+```bash
+brew install ollama
+brew services start ollama                 # runs in the background, starts at login
+ollama pull embeddinggemma                 # 0.6 GB — meaning-based search
+ollama pull qwen3.5:9b                     # 7.6 GB — answers on the Ask page
+```
+
+Ollama runs natively (not in Docker) so it can use the Apple GPU. The model needs ~8 GB of
+free memory while answering and unloads itself after a few idle minutes. On a 24 GB M4 Pro a
+typical answer starts in 5–10 s and finishes in ~15 s.
+
+## Quick start (Docker — everything else)
 
 Requires Docker.
 
@@ -77,6 +95,13 @@ Files for this live in [`samples/`](samples/).
    over 20 MB: `python3 -c "open('/tmp/big.txt','w').write('a'*21_000_000)"`.
    `samples/prompt-injection-test.md` shows that document text is only ever indexed, never
    acted on.
+7. **Search by meaning** — search for a concept using different words than your notes use
+   (e.g. "money worries" for a note about budgets). Each result is tagged *words*,
+   *meaning*, or both.
+8. **Ask** — with the sample data loaded: Ask → *Recall* → "What order should I restart the
+   home network in?" The answer
+   streams in with numbered citations; click one to jump to the passage. Ask something your
+   notes don't cover ("What's the capital of France?") and it says it couldn't find it.
 
 ## How it works
 
@@ -86,7 +111,16 @@ Files for this live in [`samples/`](samples/).
 | API | FastAPI, Pydantic 2, SQLAlchemy 2, Alembic, pypdf |
 | Data | Postgres 16 + pgvector; originals on disk, content-addressed by SHA-256 |
 | Jobs | Postgres-backed queue (`FOR UPDATE SKIP LOCKED` + lease) run by a worker thread in the API |
-| Search | Postgres full-text search (`websearch_to_tsquery`, title-weighted, `ts_headline` snippets) |
+| Search | Postgres full-text + pgvector (HNSW, cosine) merged with reciprocal-rank fusion |
+| AI | Ollama: `embeddinggemma` (768-dim embeddings), `qwen3.5:9b` (answers), both local |
+
+- **Semantic indexing:** after a source is keyword-indexed (instantly searchable), the worker
+  embeds its chunks in the background. If Ollama is down it backs off and retries; nothing
+  fails. Changing `EMBEDDING_MODEL` re-embeds everything on next start.
+- **Ask:** the question is embedded, the best 8–14 passages are retrieved (hybrid, max 4 per
+  source, ~14k characters), and the local model answers with `[n]` citations. The server
+  reports which citation numbers are valid; the UI only links those. If retrieval finds
+  nothing relevant, the model isn't called at all.
 
 - **Validation:** extension allow-list *and* content sniffing (PDF header; strict UTF-8 /
   BOM-marked UTF-16 for text). Size is capped while streaming and via `Content-Length`
@@ -106,9 +140,12 @@ API docs: http://localhost:8000/docs.
   filenames, or search queries. Uvicorn's access log (which includes query strings) is
   replaced; nginx's log format omits query strings.
 - Secrets come from the environment / `.env`, which is git-ignored. No secrets are required yet.
-- Uploaded content is inert data: it's parsed and indexed, never executed, rendered as HTML,
-  or sent to a model. React escapes all rendered text; search highlighting uses structured
-  segments, not HTML.
+- Uploaded content is inert data: it's parsed and indexed, never executed or rendered as
+  HTML. When passages are given to the model they're delimited, any passage tags inside
+  them are neutralised, and the model is told they are untrusted data, never instructions.
+  Answers render Markdown without images or external links (so a malicious document can't
+  make the answer load a URL).
+- With the default Ollama setup, no content leaves your machine.
 - Single-user and local: there is **no authentication**. Don't expose the ports publicly.
 
 ## Configuration
@@ -118,13 +155,22 @@ API docs: http://localhost:8000/docs.
 | `DATABASE_URL` | `postgresql+psycopg://braindump:braindump@localhost:5433/braindump` | |
 | `DATA_DIR` | `./data` | Uploaded originals (`apps/api/data` when run from `apps/api`) |
 | `MAX_UPLOAD_MB` | `20` | nginx allows 25 MB so the API can return its own message |
-| `EMBEDDING_PROVIDER` | `none` | Only `none` is implemented (keyword-only search) |
+| `EMBEDDING_PROVIDER` | `ollama` | `none` = keyword-only search |
+| `CHAT_PROVIDER` | `ollama` | `none` disables Ask |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Docker uses `host.docker.internal` |
+| `EMBEDDING_MODEL` | `embeddinggemma` | Must produce 768-dim vectors (or add a migration) |
+| `CHAT_MODEL` | `qwen3.5:9b` | Any Ollama chat model; smaller = faster, weaker |
+| `CHAT_NUM_CTX` | `8192` | Context window sent to Ollama (its default is too small for RAG) |
+| `VECTOR_MIN_SIMILARITY` | `0.25` | Below this, a meaning match counts as unrelated |
 | `LOG_LEVEL` | `INFO` | |
 
 ## Known limitations
 
 - No OCR: image-only PDFs fail with an explanation.
-- Keyword search is English-stemmed; no fuzzy/typo tolerance and no semantic matching yet.
+- Local-model answers are good for recall and summaries but weaker than hosted models on
+  long reports and multi-step reasoning; always check the citations.
+- Ask is single-turn (no follow-up questions yet) and has no date filters ("last month").
+- Keyword search is English-stemmed with no typo tolerance.
 - Files are read into memory (capped at `MAX_UPLOAD_MB`) for hashing and validation.
 - The worker runs inside the API process; startup re-queues interrupted jobs, which assumes a
   single API process (the lease still prevents double-processing across processes).

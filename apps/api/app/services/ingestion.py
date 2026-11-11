@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.errors import AppError, IngestionError
-from app.models import Chunk, FileType, Source, SourceKind, SourceStatus
+from app.models import Chunk, EmbeddingStatus, FileType, Source, SourceKind, SourceStatus
 from app.services.chunking import assemble
 from app.services.parsing import Segment, parse_file
 from app.services.storage import FileStorage
@@ -234,6 +234,7 @@ def process_source(session: Session, settings: Settings, storage: FileStorage, s
         source.char_count = len(full_text)
         source.page_count = page_count
         source.status = SourceStatus.ready
+        source.embedding_status = EmbeddingStatus.pending
         source.error_code = None
         source.error_message = None
         source.processing_started_at = None

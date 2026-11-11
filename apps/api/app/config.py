@@ -23,7 +23,22 @@ class Settings(BaseSettings):
     worker_lease_seconds: int = 600
     worker_max_attempts: int = 3
 
-    embedding_provider: Literal["none"] = "none"
+    embedding_provider: Literal["none", "ollama"] = "none"
+    chat_provider: Literal["none", "ollama"] = "none"
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_timeout_seconds: float = 180.0
+    embedding_model: str = "embeddinggemma"
+    embedding_batch_size: int = 32
+    chat_model: str = "qwen3.5:9b"
+    chat_num_ctx: int = 8192
+    chat_temperature: float = 0.3
+    chat_think: bool | None = False
+
+    # Cosine similarity below which a vector match is treated as unrelated. Calibrated for
+    # embeddinggemma: unrelated questions score < 0.15, related ones > 0.33.
+    vector_min_similarity: float = 0.25
+    retrieval_candidates: int = 100
+    ask_context_chars: int = 14_000
 
     @property
     def max_upload_bytes(self) -> int:

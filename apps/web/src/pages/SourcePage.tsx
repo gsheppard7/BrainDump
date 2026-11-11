@@ -54,6 +54,7 @@ function SourceView({ source, query, chunkParam }: { source: SourceDetail; query
     ['Characters', source.char_count?.toLocaleString()],
     ['Added', formatDateTime(source.created_at)],
     ['Processed', source.processed_at ? formatDateTime(source.processed_at) : null],
+    ['Meaning index', source.embedding_status === 'done' ? 'Ready' : source.embedding_status === 'pending' ? 'Pending' : null],
   ].filter((f): f is [string, string] => Boolean(f[1]))
 
   const onDelete = () => {

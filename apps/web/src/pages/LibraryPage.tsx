@@ -5,7 +5,7 @@ import { Alert } from '../components/Alert'
 import { KindTag } from '../components/KindTag'
 import { SourceRow } from '../components/SourceRow'
 import { Spinner } from '../components/StatusBadge'
-import { useDebounced, useSearch, useSources } from '../hooks'
+import { useDebounced, useMeta, useSearch, useSources } from '../hooks'
 import { formatRelative } from '../lib/format'
 import type { SearchHit, SourceStatus } from '../types'
 
@@ -66,15 +66,33 @@ export function LibraryPage() {
             className="w-full rounded-xl border border-stone-200 bg-white py-3 pr-4 pl-10 text-sm shadow-sm outline-none placeholder:text-stone-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
           />
         </div>
-        <p className="mt-2 flex items-center gap-2 text-xs text-stone-500">
-          <span className="rounded-full bg-stone-200/70 px-2 py-0.5 font-medium text-stone-700">Keyword search</span>
-          Matches words and their variants, not meaning. Semantic search isn't configured yet.
-          Use "quotes" for phrases and -word to exclude.
-        </p>
+        <SearchModeNote />
       </div>
 
       {urlQuery ? <SearchResults query={urlQuery} /> : <BrowseList />}
     </div>
+  )
+}
+
+function SearchModeNote() {
+  const meta = useMeta()
+  const semantic = meta.data?.capabilities.semantic_search ?? false
+  const pending = meta.data?.index.semantic_pending ?? 0
+  return (
+    <p className="mt-2 flex flex-wrap items-center gap-2 text-xs text-stone-500">
+      <span className="rounded-full bg-stone-200/70 px-2 py-0.5 font-medium text-stone-700">
+        {semantic ? 'Hybrid search' : 'Keyword search'}
+      </span>
+      {semantic
+        ? 'Matches exact words and related meaning, computed locally.'
+        : "Matches words and their variants, not meaning — local AI isn't available."}{' '}
+      Use "quotes" for phrases and -word to exclude.
+      {semantic && pending > 0 && (
+        <span className="text-amber-700">
+          Indexing meaning for {pending} source{pending === 1 ? '' : 's'}…
+        </span>
+      )}
+    </p>
   )
 }
 
@@ -102,6 +120,11 @@ function SearchResults({ query }: { query: string }) {
   }
   return (
     <section aria-label="Search results" className={search.isFetching ? 'opacity-70 transition' : 'transition'}>
+      {data.notice && (
+        <div className="mb-3">
+          <Alert tone="warning">{data.notice}</Alert>
+        </div>
+      )}
       <p className="mb-2 px-1 text-xs text-stone-500">
         {data.total} matching source{data.total === 1 ? '' : 's'}
       </p>
@@ -125,6 +148,15 @@ function SearchResultItem({ hit, query }: { hit: SearchHit; query: string }) {
         <div className="flex items-center gap-3">
           <KindTag kind={hit.kind} fileType={hit.file_type} />
           <span className="truncate font-medium">{hit.title}</span>
+          {hit.match_reasons.map((reason) => (
+            <span
+              key={reason}
+              className="shrink-0 rounded-full bg-stone-100 px-2 py-0.5 text-[11px] text-stone-600"
+              title={reason === 'keyword' ? 'Contains your search words' : 'Related in meaning'}
+            >
+              {reason === 'keyword' ? 'words' : 'meaning'}
+            </span>
+          ))}
           <span className="ml-auto shrink-0 text-xs text-stone-500">
             {[hit.page ? `p. ${hit.page}` : null, hit.match_count > 1 ? `${hit.match_count} passages` : null, formatRelative(hit.created_at)]
               .filter(Boolean)

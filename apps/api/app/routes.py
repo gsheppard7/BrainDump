@@ -1,17 +1,23 @@
+import json
+import logging
 import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Query, Request, Response, UploadFile, status
-from sqlalchemy import func, select, text
+from fastapi.responses import StreamingResponse
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.ai.embeddings import get_embedding_provider
+from app.ai import registry
 from app.config import Settings, get_settings
 from app.db import get_session
 from app.errors import AppError
-from app.models import Source, SourceKind, SourceStatus
+from app.models import EmbeddingStatus, Source, SourceKind, SourceStatus
 from app.schemas import (
+    AIInfo,
+    AskRequest,
     Capabilities,
+    IndexStats,
     MetaResponse,
     NoteCreate,
     SearchResponse,
@@ -20,11 +26,13 @@ from app.schemas import (
     SourceSummary,
 )
 from app.services import ingestion
+from app.services.ask import gather_context, stream_answer
 from app.services.search import search
 from app.services.storage import FileStorage
 from app.services.validation import EXTENSIONS, file_too_large
 
 router = APIRouter(prefix="/api")
+logger = logging.getLogger(__name__)
 
 SessionDep = Annotated[Session, Depends(get_session)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
@@ -54,11 +62,18 @@ def _get_source(session: Session, source_id: uuid.UUID) -> Source:
 @router.get("/meta", response_model=MetaResponse)
 def meta(session: SessionDep, settings: SettingsDep) -> MetaResponse:
     try:
-        session.execute(text("SELECT 1"))
+        counts = session.execute(
+            select(
+                func.count(),
+                func.count().filter(Source.embedding_status == EmbeddingStatus.done),
+                func.count().filter(Source.embedding_status == EmbeddingStatus.pending),
+            ).where(Source.status == SourceStatus.ready)
+        ).one()
         db_ok = True
     except Exception:
+        counts = (0, 0, 0)
         db_ok = False
-    semantic = get_embedding_provider(settings) is not None
+    ai = registry.ai_status(settings)
     return MetaResponse(
         status="ok" if db_ok else "degraded",
         database=db_ok,
@@ -67,9 +82,20 @@ def meta(session: SessionDep, settings: SettingsDep) -> MetaResponse:
         accepted_extensions=sorted(EXTENSIONS),
         capabilities=Capabilities(
             keyword_search=True,
-            semantic_search=semantic,
-            grounded_chat=False,
+            semantic_search=ai.embeddings_ready,
+            grounded_chat=ai.chat_ready,
             memory_extraction=False,
+        ),
+        ai=AIInfo(
+            provider=ai.provider,
+            location=ai.location,
+            embedding_model=ai.embedding_model,
+            chat_model=ai.chat_model,
+            reachable=ai.reachable,
+            message=ai.message,
+        ),
+        index=IndexStats(
+            ready_sources=counts[0], semantic_indexed=counts[1], semantic_pending=counts[2]
         ),
     )
 
@@ -159,16 +185,59 @@ def search_sources(
     query = q.strip()
     if not query:
         raise AppError(422, "empty_query", "Type something to search for.")
-    result = search(session, query, limit=limit, offset=offset)
+    embedder = registry.get_embedding_provider(settings)
+    vector, notice = None, None
+    if embedder is not None:
+        try:
+            vector = embedder.embed_query(query)
+        except Exception as exc:
+            logger.warning("query embedding failed error=%s", type(exc).__name__)
+            notice = (
+                "Meaning-based matching is unavailable right now; showing keyword matches only."
+            )
+    result = search(
+        session,
+        query,
+        limit=limit,
+        offset=offset,
+        query_vector=vector,
+        min_similarity=settings.vector_min_similarity,
+        candidates=settings.retrieval_candidates,
+    )
     return SearchResponse.model_validate(
         {
             "query": query,
-            "mode": "keyword",
-            "semantic_available": get_embedding_provider(settings) is not None,
+            "mode": "hybrid" if vector is not None else "keyword",
+            "semantic_available": embedder is not None,
+            "notice": notice,
             "total": result.total,
             "query_has_terms": result.query_has_terms,
             "hits": [
                 hit.__dict__ | {"snippet": [p.__dict__ for p in hit.snippet]} for hit in result.hits
             ],
         }
+    )
+
+
+@router.post("/ask")
+def ask(payload: AskRequest, session: SessionDep, settings: SettingsDep) -> StreamingResponse:
+    """Streams newline-delimited JSON events: meta, context, delta*, then done or error."""
+    question = payload.question.strip()
+    if not question:
+        raise AppError(422, "empty_question", "Type a question or request first.")
+    chat = registry.get_chat_provider(settings)
+    if chat is None:
+        raise AppError(
+            503,
+            "ai_disabled",
+            "Ask needs an AI model. Set CHAT_PROVIDER=ollama in .env and restart the API.",
+        )
+    passages, notice = gather_context(
+        session, settings, question, payload.mode, registry.get_embedding_provider(settings)
+    )
+    events = stream_answer(chat, question, payload.mode, passages, notice)
+    return StreamingResponse(
+        (json.dumps(event) + "\n" for event in events),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
     )

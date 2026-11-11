@@ -20,7 +20,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
 
-EMBEDDING_DIMENSIONS = 1536
+EMBEDDING_DIMENSIONS = 768
 
 
 class SourceKind(enum.StrEnum):
@@ -33,6 +33,11 @@ class SourceStatus(enum.StrEnum):
     processing = "processing"
     ready = "ready"
     failed = "failed"
+
+
+class EmbeddingStatus(enum.StrEnum):
+    pending = "pending"
+    done = "done"
 
 
 class FileType(enum.StrEnum):
@@ -70,6 +75,11 @@ class Source(Base):
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     processing_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    embedding_status: Mapped[EmbeddingStatus | None] = mapped_column(
+        _enum(EmbeddingStatus, "embedding_status")
+    )
+    embedding_attempted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     text_content: Mapped[str | None] = mapped_column(Text)
     char_count: Mapped[int | None] = mapped_column(Integer)

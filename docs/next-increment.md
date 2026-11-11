@@ -1,86 +1,54 @@
-# Next increment (M2–M4): hybrid retrieval, cited Q&A, reviewed memories
+# Roadmap after M2
 
-Everything below builds on seams that already exist: `chunks.embedding vector(1536)`,
-`chunks.embedding_model`, and the protocols in `apps/api/app/ai/`.
+## Done in M2 (local AI)
 
-## 1. Embeddings + hybrid retrieval (M2)
+- **Local models via Ollama:** `embeddinggemma` for embeddings, `qwen3.5:9b` for answers.
+  Provider-agnostic interfaces in `apps/api/app/ai/` (`EmbeddingProvider`, `ChatProvider`),
+  selected per job by `EMBEDDING_PROVIDER` / `CHAT_PROVIDER`.
+- **Background semantic indexing** with backoff when Ollama is down and automatic re-embedding
+  when the embedding model changes.
+- **Hybrid search:** full-text and HNSW cosine candidates merged by reciprocal-rank fusion;
+  each hit reports `match_reasons` (`keyword`, `semantic`).
+- **Ask (`POST /api/ask`, streaming NDJSON):** Recall / Plan / Report / Brainstorm modes,
+  `[n]` citations validated server-side, no model call when nothing relevant is retrieved,
+  prompt-injection hardening (delimited passages, neutralised tags, no images/links in output).
 
-**Provider** — implement `EmbeddingProvider` (`app/ai/embeddings.py`) for one hosted provider
-(e.g. OpenAI `text-embedding-3-small`, 1536 dims) behind `EMBEDDING_PROVIDER=openai` +
-`OPENAI_API_KEY`. Add a deterministic `FakeEmbeddingProvider` for tests only.
+## M2.5: quality and ergonomics (small, high value)
 
-**Pipeline** — add a `ready → embedding` step that runs *after* keyword indexing, so a source
-is searchable by keyword immediately and gains semantic recall when embeddings land:
+1. **Evaluation set:** 20–30 real questions with the passages that should answer them, stored
+   in `apps/api/eval/`. A script reports retrieval recall@k and citation accuracy so model and
+   threshold changes are measured, not guessed.
+2. **Follow-up questions:** `chat_sessions` / `chat_messages` tables (cited chunk ids stored
+   per message); the next question is rewritten into a standalone query before retrieval.
+3. **Date filters:** parse "last month" / "this year" into a `created_at` range on retrieval.
+4. **Hosted answering (optional):** `OpenAIChatProvider` behind `CHAT_PROVIDER=openai`;
+   embeddings stay local, so only each question's passages leave the machine.
 
-```python
-class SourceStatus(StrEnum):
-    pending, processing, ready, failed            # unchanged
-class EmbeddingStatus(StrEnum):                    # new column on sources
-    not_configured, pending, done, failed
-```
+## M3: a model of you (enrichment + memories)
 
-Batch chunks (≤ 96 per call), store `embedding` + `embedding_model`, retry with backoff;
-failures never flip a source back out of `ready`. Re-embed when `embedding_model` changes.
-
-**Index** — migration `0002`: `CREATE INDEX ... USING hnsw (embedding vector_cosine_ops)`.
-
-**Retriever** — new `app/services/retrieval.py`:
-
-```python
-@dataclass(frozen=True)
-class RetrievalQuery:
-    text: str
-    limit: int = 20
-    source_ids: list[uuid.UUID] | None = None   # optional scoping
-
-class Retriever(Protocol):
-    def retrieve(self, q: RetrievalQuery) -> list[RetrievedChunk]: ...   # app.ai.answering
-
-class HybridRetriever:
-    """Reciprocal-rank fusion of keyword (ts_rank_cd) and vector (cosine) result lists.
-    Falls back to keyword-only when no provider is configured."""
-    def __init__(self, session, embeddings: EmbeddingProvider | None, k: int = 60): ...
-```
-
-`GET /api/search` gains `mode: "keyword" | "hybrid"` in the response (already a field) and
-per-hit `match_reasons: ["keyword", "semantic"]` so the UI can explain *why* something matched.
-
-## 2. Cited Q&A (M3)
-
-```
-POST /api/ask   { "question": str, "source_ids"?: [uuid] }
-→ 200 { "answer": str, "grounded": bool,
-        "citations": [{ "source_id", "chunk_id", "page", "quote" }] }
-```
-
-- `GroundedAnswerer` implementation receives the top-k `RetrievedChunk`s, wrapped in clearly
-  delimited `<document id=...>` blocks, with a system prompt stating that document text is
-  untrusted data and must never be followed as instructions.
-- The answer must cite chunk ids inline (`[c:<chunk_id>]`); the server **validates** every
-  cited id was in the provided context and that each `quote` is a verbatim substring of that
-  chunk. Unverifiable citations are dropped; if none remain, return `grounded: false` with
-  "I couldn't find that in your library."
-- UI: answer panel on Library page; citations link to `/sources/:id?chunk=N` (already works).
-- Store Q&A history in `conversations` / `messages` tables (opt-in, deletable).
-
-## 3. User-reviewed memories (M4)
+Background jobs after `embedding_status = done`, using the local chat model:
 
 ```sql
-memories(id, statement, category, status: proposed|accepted|rejected|archived,
-         confidence, created_at, reviewed_at)
-memory_evidence(memory_id, chunk_id)   -- provenance: every memory links to source chunks
+source_summaries(source_id, summary, model, created_at)
+topics(id, name, slug)            source_topics(source_id, topic_id, weight)
+memories(id, statement, category, status: pending|active|superseded|rejected,
+         confidence, valid_from, valid_to, superseded_by, created_at, reviewed_at)
+memory_evidence(memory_id, chunk_id)
 ```
 
-- `MemoryExtractor.propose()` runs as an optional post-`ready` job and only ever creates
-  `proposed` rows. Nothing becomes `accepted` without an explicit user action.
-- Endpoints: `GET /api/memories?status=proposed`, `POST /api/memories/{id}/accept`,
-  `/reject`, `PATCH /api/memories/{id}` (edit before accepting), `DELETE`.
-- Deleting a source deletes its evidence; memories left with no evidence are flagged for review.
-- Accepted memories are retrievable context for `/api/ask`, always shown with provenance.
+- `MemoryExtractor.propose()` (`app/ai/memory.py`) only ever creates `pending` rows. Nothing
+  becomes `active` without an explicit user action (approve / edit / reject / supersede).
+- Memory page: pending inbox, active memories by category (skills, interests, goals,
+  preferences), contradictions flagged when a new candidate conflicts with an active one.
+- Active memories are added to Ask context (with provenance), which makes plans and advice
+  personal.
 
-## Next 3 priorities
+## M4: insights and connections
 
-1. **Hybrid retrieval** (provider + embedding job + HNSW index + RRF) — biggest recall win,
-   and the prerequisite for good Q&A.
-2. **Cited Q&A with server-side citation verification** — the core "second brain" experience.
-3. **Memory review inbox** — proposed facts with provenance, accept/edit/reject.
+- **Related notes** on every source (nearest neighbours by embedding, with a one-line
+  explanation of the shared idea).
+- **Trends:** topic counts over time (timeline chart), "rising" and "fading" topics.
+- **Cross-domain connections:** pairs of sources from different topics with unusually high
+  similarity, explained by the model ("Kalman filters ↔ baseball tracking").
+- **Connections graph:** interactive force-directed view; nodes = topics, sources, memories;
+  edges = similarity, shared topics, evidence. Click a node to open it.

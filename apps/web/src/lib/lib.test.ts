@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { toApiError } from '../api'
+import { citationNumber, linkCitations } from './citations'
 import { precheckFile } from './files'
 import { formatBytes } from './format'
 import { highlightTerms, queryTerms } from './highlight'
@@ -11,6 +12,16 @@ const file = (name: string, size: number) => {
   Object.defineProperty(f, 'size', { value: size })
   return f
 }
+
+describe('linkCitations', () => {
+  it('links valid citation numbers and leaves others alone', () => {
+    expect(linkCitations('See [1] and [2, 3] but not [7].', 3)).toBe(
+      'See [\\[1\\]](#cite-1) and [\\[2\\]](#cite-2)[\\[3\\]](#cite-3) but not [7].',
+    )
+    expect(citationNumber('#cite-12')).toBe(12)
+    expect(citationNumber('https://example.com')).toBeNull()
+  })
+})
 
 describe('queryTerms', () => {
   it('drops operators, negations, quotes and stop words', () => {
