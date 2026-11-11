@@ -120,11 +120,14 @@ def test_ask_without_relevant_context_says_so_without_calling_model(client, inde
     chat = FakeChatProvider(["should not be used"])
     with registry.override(chat=chat):
         events = _ask(client, "What is quantum chromodynamics?")
-    assert [e["type"] for e in events] == ["meta", "context", "delta", "done"]
-    assert events[1]["passages"] == []
-    assert events[2]["text"] == NO_CONTEXT_ANSWER
-    assert events[3] == {"type": "done", "citations": [], "grounded": False}
+    assert [e["type"] for e in events] == ["session", "meta", "context", "delta", "done"]
+    assert events[2]["passages"] == []
+    assert events[3]["text"] == NO_CONTEXT_ANSWER
+    assert events[-1]["type"] == "done" and events[-1]["grounded"] is False
     assert chat.messages is None
+    saved = client.get(f"/api/chats/{events[0]['id']}").json()
+    assert saved["messages"][0]["content"].startswith("What is quantum")
+    assert saved["messages"][1]["content"] == NO_CONTEXT_ANSWER
 
 
 def test_ask_streams_grounded_answer_with_valid_citations(client, indexed):
@@ -137,17 +140,21 @@ def test_ask_streams_grounded_answer_with_valid_citations(client, indexed):
         events = _ask(client, "When did I last service my automobile?", mode="plan")
 
     types = [e["type"] for e in events]
-    assert types[:2] == ["meta", "context"] and types[-1] == "done"
-    passages = events[1]["passages"]
+    assert types[0] == "session" and types[1:3] == ["meta", "context"] and types[-1] == "done"
+    passages = events[2]["passages"]
     assert passages[0]["n"] == 1 and passages[0]["source_id"] == car_id
     assert "".join(e["text"] for e in events if e["type"] == "delta").startswith("You took it")
-    assert events[-1] == {"type": "done", "citations": [1], "grounded": True}
+    assert events[-1]["citations"] == [1] and events[-1]["grounded"] is True
+    assert events[-1]["session_id"] == events[0]["id"]
 
     system, user = chat.messages
     assert "untrusted data" in system.content
     assert "Suggestions (not from your notes)" in system.content, "plan mode instructions"
     assert '<passage id="1" source="Car service"' in user.content
     assert "Request: When did I last service my automobile?" in user.content
+
+    history = client.get("/api/chats").json()
+    assert history["total"] == 1 and history["items"][0]["mode"] == "plan"
 
 
 def test_ask_neutralises_passage_tags_in_documents(client, indexed):
@@ -230,3 +237,43 @@ def test_ollama_chat_stream_parses_ndjson():
     )
     assert chunks == ["Hel", "lo"]
     assert seen["body"]["think"] is False and seen["body"]["stream"] is True
+
+
+def test_chat_history_can_be_listed_opened_and_deleted(client, indexed):
+    indexed(("Car", "Oil change at the mechanic on Friday."))
+    with registry.override(chat=FakeChatProvider(["Service was Friday [1]."])):
+        events = _ask(client, "When was the car serviced?")
+    chat_id = events[0]["id"]
+    listed = client.get("/api/chats").json()
+    assert listed["total"] == 1
+    detail = client.get(f"/api/chats/{chat_id}").json()
+    assert detail["messages"][0]["role"] == "user"
+    assert detail["messages"][1]["citations"] == [1]
+    assert client.delete(f"/api/chats/{chat_id}").status_code == 204
+    assert client.get("/api/chats").json()["total"] == 0
+
+
+def test_graph_connects_related_sources_by_meaning(client, indexed, settings):
+    car_id, food_id, bike_id = indexed(
+        (
+            "Car service",
+            "Took the automobile to the mechanic for an oil change. The vehicle felt rough.",
+        ),
+        ("Groceries", "Buy lemons, rice, coffee beans and oatmeal for breakfast."),
+        (
+            "Vehicle notes",
+            "The car and automobile needed new brake pads after the mechanic looked at it.",
+        ),
+    )
+    body = client.get("/api/graph").json()
+    assert body["stats"]["sources"] == 3
+    assert body["stats"]["indexed"] == 3
+    ids = {n["id"] for n in body["nodes"]}
+    assert ids == {car_id, food_id, bike_id}
+    pairs = {(e["source"], e["target"]) for e in body["edges"]} | {
+        (e["target"], e["source"]) for e in body["edges"]
+    }
+    assert (car_id, bike_id) in pairs
+    # Unrelated food note should not connect at the default threshold in the fake embedder.
+    assert (car_id, food_id) not in pairs and (food_id, car_id) not in pairs
+    assert body["stats"]["min_similarity"] == settings.graph_min_similarity

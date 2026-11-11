@@ -1,7 +1,8 @@
 import json
 import logging
 import uuid
-from typing import Annotated
+from collections.abc import Iterator
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, Query, Request, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
@@ -10,13 +11,17 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.ai import registry
 from app.config import Settings, get_settings
-from app.db import get_session
+from app.db import get_session, get_session_factory
 from app.errors import AppError
 from app.models import EmbeddingStatus, Source, SourceKind, SourceStatus
 from app.schemas import (
     AIInfo,
     AskRequest,
     Capabilities,
+    ChatSessionDetail,
+    ChatSessionList,
+    ChatSessionSummary,
+    GraphResponse,
     IndexStats,
     MetaResponse,
     NoteCreate,
@@ -25,8 +30,9 @@ from app.schemas import (
     SourceList,
     SourceSummary,
 )
-from app.services import ingestion
-from app.services.ask import gather_context, stream_answer
+from app.services import chats, ingestion
+from app.services.ask import AskMode, gather_context, stream_answer
+from app.services.graph import build_graph, graph_as_dict
 from app.services.search import search
 from app.services.storage import FileStorage
 from app.services.validation import EXTENSIONS, file_too_large
@@ -219,9 +225,85 @@ def search_sources(
     )
 
 
+def _ask_events(
+    *,
+    question: str,
+    mode: AskMode,
+    passages: list,
+    notice: str | None,
+    chat,
+) -> Iterator[dict[str, Any]]:
+    """Stream Ask events and persist the turn to chat history."""
+    factory = get_session_factory()
+    with factory() as db:
+        chat_session = chats.create_session(db, question, mode)
+        db.commit()
+        session_id = chat_session.id
+    yield {"type": "session", "id": str(session_id)}
+
+    answer_parts: list[str] = []
+    passages_payload: list[dict] | None = None
+    model: str | None = None
+    notice_out = notice
+    finished = False
+    try:
+        for event in stream_answer(chat, question, mode, passages, notice):
+            kind = event["type"]
+            if kind == "meta":
+                model = event.get("model")
+                notice_out = event.get("notice")
+            elif kind == "context":
+                passages_payload = event.get("passages")
+            elif kind == "delta":
+                answer_parts.append(event["text"])
+            elif kind == "done":
+                with factory() as db:
+                    chats.save_assistant(
+                        db,
+                        session_id,
+                        content="".join(answer_parts),
+                        citations=event.get("citations"),
+                        passages=passages_payload,
+                        grounded=event.get("grounded"),
+                        model=model,
+                        notice=notice_out,
+                    )
+                    db.commit()
+                finished = True
+                yield {**event, "session_id": str(session_id)}
+                continue
+            elif kind == "error":
+                with factory() as db:
+                    chats.save_assistant(
+                        db,
+                        session_id,
+                        content="".join(answer_parts),
+                        passages=passages_payload,
+                        model=model,
+                        notice=notice_out,
+                        error_message=event.get("message"),
+                    )
+                    db.commit()
+                finished = True
+            yield event
+    finally:
+        if not finished:
+            with factory() as db:
+                chats.save_assistant(
+                    db,
+                    session_id,
+                    content="".join(answer_parts),
+                    passages=passages_payload,
+                    model=model,
+                    notice=notice_out,
+                    error_message="Stopped." if answer_parts else "Interrupted before an answer.",
+                )
+                db.commit()
+
+
 @router.post("/ask")
 def ask(payload: AskRequest, session: SessionDep, settings: SettingsDep) -> StreamingResponse:
-    """Streams newline-delimited JSON events: meta, context, delta*, then done or error."""
+    """Streams newline-delimited JSON events: session, meta, context, delta*, then done or error."""
     question = payload.question.strip()
     if not question:
         raise AppError(422, "empty_question", "Type a question or request first.")
@@ -235,9 +317,51 @@ def ask(payload: AskRequest, session: SessionDep, settings: SettingsDep) -> Stre
     passages, notice = gather_context(
         session, settings, question, payload.mode, registry.get_embedding_provider(settings)
     )
-    events = stream_answer(chat, question, payload.mode, passages, notice)
+    events = _ask_events(
+        question=question, mode=payload.mode, passages=passages, notice=notice, chat=chat
+    )
     return StreamingResponse(
         (json.dumps(event) + "\n" for event in events),
         media_type="application/x-ndjson",
         headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
     )
+
+
+@router.get("/chats", response_model=ChatSessionList)
+def list_chats(
+    session: SessionDep,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> ChatSessionList:
+    items, total = chats.list_sessions(session, limit=limit, offset=offset)
+    return ChatSessionList(
+        items=[ChatSessionSummary.model_validate(item) for item in items], total=total
+    )
+
+
+@router.get("/chats/{chat_id}", response_model=ChatSessionDetail)
+def get_chat(chat_id: uuid.UUID, session: SessionDep) -> ChatSessionDetail:
+    chat = chats.get_session(session, chat_id)
+    if chat is None:
+        raise AppError(404, "not_found", "That conversation doesn't exist.")
+    return ChatSessionDetail.model_validate(chat)
+
+
+@router.delete("/chats/{chat_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_chat(chat_id: uuid.UUID, session: SessionDep) -> Response:
+    chat = chats.get_session(session, chat_id)
+    if chat is None:
+        raise AppError(404, "not_found", "That conversation doesn't exist.")
+    chats.delete_session(session, chat)
+    session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/graph", response_model=GraphResponse)
+def knowledge_graph(session: SessionDep, settings: SettingsDep) -> GraphResponse:
+    graph = build_graph(
+        session,
+        min_similarity=settings.graph_min_similarity,
+        max_edges=settings.graph_max_edges,
+    )
+    return GraphResponse.model_validate(graph_as_dict(graph))

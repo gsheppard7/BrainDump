@@ -24,13 +24,16 @@ const passage = (n: number, title: string): AskPassage => ({
 describe('AskPage', () => {
   it('streams a cited answer and links citations to sources', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
-      if (String(input).startsWith('/api/meta')) return jsonResponse(makeMeta({ semantic: true, chat: true }))
+      const url = String(input)
+      if (url.startsWith('/api/meta')) return jsonResponse(makeMeta({ semantic: true, chat: true }))
+      if (url.startsWith('/api/chats')) return jsonResponse({ items: [], total: 0 })
       return ndjsonResponse([
+        { type: 'session', id: 'chat-1' },
         { type: 'meta', model: 'qwen3.5:9b', location: 'local', notice: null },
         { type: 'context', passages: [passage(1, 'Network Guide'), passage(2, 'Groceries')] },
         { type: 'delta', text: 'Restart the **modem** first [1]' },
         { type: 'delta', text: ', then the router [1, 9]. ![x](https://evil.example/p.png)' },
-        { type: 'done', citations: [1], grounded: true },
+        { type: 'done', citations: [1], grounded: true, session_id: 'chat-1' },
       ])
     })
     renderWithProviders(<AskPage />, { route: '/ask' })
@@ -55,11 +58,65 @@ describe('AskPage', () => {
   })
 
   it('explains when local AI is unavailable', async () => {
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
-      jsonResponse(makeMeta({ message: "Ollama isn't running. Start it with: brew services start ollama" })),
-    )
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.startsWith('/api/chats')) return jsonResponse({ items: [], total: 0 })
+      return jsonResponse(makeMeta({ message: "Ollama isn't running. Start it with: brew services start ollama" }))
+    })
     renderWithProviders(<AskPage />, { route: '/ask' })
     expect(await screen.findByText(/brew services start ollama/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Ask' })).toBeDisabled()
+  })
+
+  it('reopens a saved conversation from history', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.startsWith('/api/meta')) return jsonResponse(makeMeta({ semantic: true, chat: true }))
+      if (url.includes('/api/chats/chat-9')) {
+        return jsonResponse({
+          id: 'chat-9',
+          title: 'What are my interests?',
+          mode: 'recall',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          messages: [
+            { id: 'm1', role: 'user', content: 'What are my interests?', citations: null, passages: null, grounded: null, model: null, notice: null, error_message: null, created_at: new Date().toISOString() },
+            {
+              id: 'm2',
+              role: 'assistant',
+              content: 'Sports analytics and robotics [1].',
+              citations: [1],
+              passages: [passage(1, 'Brain dump')],
+              grounded: true,
+              model: 'qwen3.5:9b',
+              notice: null,
+              error_message: null,
+              created_at: new Date().toISOString(),
+            },
+          ],
+        })
+      }
+      if (url.includes('/api/chats')) {
+        return jsonResponse({
+          items: [
+            {
+              id: 'chat-9',
+              title: 'What are my interests?',
+              mode: 'recall',
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            },
+          ],
+          total: 1,
+        })
+      }
+      throw new Error(`unexpected fetch ${url}`)
+    })
+    renderWithProviders(<AskPage />, { route: '/ask' })
+    const historyItem = await screen.findByRole('button', { name: 'What are my interests?' })
+    await userEvent.click(historyItem)
+    const answer = await screen.findByRole('region', { name: 'Answer' })
+    expect(within(answer).getByText(/Sports analytics and robotics/)).toBeInTheDocument()
+    expect(within(answer).getByText(/You asked/)).toBeInTheDocument()
   })
 })

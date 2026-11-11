@@ -42,7 +42,36 @@ export function useInvalidateSources() {
   return () => Promise.all([
     client.invalidateQueries({ queryKey: ['sources'] }),
     client.invalidateQueries({ queryKey: ['search'] }),
+    client.invalidateQueries({ queryKey: ['graph'] }),
   ])
+}
+
+export function useChats() {
+  return useQuery({ queryKey: ['chats'], queryFn: api.listChats })
+}
+
+export function useChat(id: string | null) {
+  return useQuery({
+    queryKey: ['chats', 'detail', id],
+    queryFn: () => api.getChat(id!),
+    enabled: Boolean(id),
+  })
+}
+
+export function useDeleteChat() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: api.deleteChat,
+    onSuccess: () => client.invalidateQueries({ queryKey: ['chats'] }),
+  })
+}
+
+export function useGraph() {
+  return useQuery({
+    queryKey: ['graph'],
+    queryFn: api.graph,
+    refetchInterval: (query) => (query.state.data?.stats.pending ? 3000 : false),
+  })
 }
 
 export function useCreateNote() {

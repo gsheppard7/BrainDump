@@ -60,8 +60,9 @@ Postgres 16 + pgvector (Docker Compose)
 - [x] M1 — capture (note + upload), validation, dedup, worker, library, search, detail view,
       status states, seed data, tests
 - [x] M2 — local embeddings, hybrid retrieval, cited Q&A (Ask page)
-- [ ] M2.5 — evaluation set, follow-up questions, date filters
+- [x] M2.5a — Ask history + Brain map (source similarity graph)
+- [ ] M2.5b — evaluation set, follow-up questions, date filters
 - [ ] M3 — summaries, topics, user-reviewed memories
-- [ ] M4 — related notes, trends, connections graph
+- [ ] M4 — related notes, trends, richer graph (topics + memories)
 
 See `docs/next-increment.md`.

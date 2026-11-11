@@ -1,6 +1,9 @@
 import type {
   AskEvent,
   AskMode,
+  ChatSessionDetail,
+  ChatSessionList,
+  KnowledgeGraph,
   Meta,
   SearchResponse,
   SourceDetail,
@@ -122,6 +125,15 @@ export const api = {
     if (!res.ok || !res.body) throw toApiError(res.status, await res.text())
     await readNdjson(res.body, (line) => onEvent(JSON.parse(line) as AskEvent))
   },
+
+  listChats: () => request<ChatSessionList>('/api/chats?limit=50'),
+
+  getChat: (id: string) => request<ChatSessionDetail>(`/api/chats/${encodeURIComponent(id)}`),
+
+  deleteChat: (id: string) =>
+    request<void>(`/api/chats/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  graph: () => request<KnowledgeGraph>('/api/graph'),
 
   /** XHR instead of fetch so we can report upload progress. */
   uploadFile: (file: File, onProgress?: (fraction: number) => void) =>

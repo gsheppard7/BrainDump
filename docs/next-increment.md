@@ -13,16 +13,26 @@
   `[n]` citations validated server-side, no model call when nothing relevant is retrieved,
   prompt-injection hardening (delimited passages, neutralised tags, no images/links in output).
 
-## M2.5: quality and ergonomics (small, high value)
+## Done in M2.5a (history + brain map)
+
+- **Ask history:** every Ask turn is saved (`chat_sessions` / `chat_messages`). The Ask page
+  has a History sidebar to reopen or delete past answers with their citations.
+- **Brain map (`/brain`):** interactive force-directed graph of sources. Edges are cosine
+  similarity between each source's mean chunk embedding (`GET /api/graph`). Click a node to
+  inspect related sources; double-click to open it.
+
+## M2.5b: quality and ergonomics
 
 1. **Evaluation set:** 20–30 real questions with the passages that should answer them, stored
    in `apps/api/eval/`. A script reports retrieval recall@k and citation accuracy so model and
    threshold changes are measured, not guessed.
-2. **Follow-up questions:** `chat_sessions` / `chat_messages` tables (cited chunk ids stored
-   per message); the next question is rewritten into a standalone query before retrieval.
+2. **Follow-up questions:** continue a saved session; rewrite the next question into a
+   standalone query before retrieval.
 3. **Date filters:** parse "last month" / "this year" into a `created_at` range on retrieval.
 4. **Hosted answering (optional):** `OpenAIChatProvider` behind `CHAT_PROVIDER=openai`;
    embeddings stay local, so only each question's passages leave the machine.
+5. **Richer brain map:** topic nodes, memory nodes, and one-line explanations of edges once
+   M3 enrichment exists.
 
 ## M3: a model of you (enrichment + memories)
 

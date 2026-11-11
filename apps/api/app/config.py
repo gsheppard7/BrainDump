@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     vector_min_similarity: float = 0.25
     retrieval_candidates: int = 100
     ask_context_chars: int = 14_000
+    # Source-centroid cosine similarity for the Brain map. Averaging softens scores, so
+    # this sits a bit above the chunk retrieval floor.
+    graph_min_similarity: float = 0.3
+    graph_max_edges: int = 500
 
     @property
     def max_upload_bytes(self) -> int:

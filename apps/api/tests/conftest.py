@@ -60,7 +60,7 @@ def clean_state(database):
     settings = get_settings()
     original_max = settings.max_upload_mb
     with get_session_factory()() as session:
-        session.execute(text("TRUNCATE chunks, sources CASCADE"))
+        session.execute(text("TRUNCATE chat_messages, chat_sessions, chunks, sources CASCADE"))
         session.commit()
     shutil.rmtree(settings.upload_dir, ignore_errors=True)
     settings.upload_dir.mkdir(parents=True, exist_ok=True)

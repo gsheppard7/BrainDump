@@ -24,6 +24,9 @@ export function Layout() {
             <NavLink to="/ask" className={navClass}>
               Ask
             </NavLink>
+            <NavLink to="/brain" className={navClass}>
+              Brain
+            </NavLink>
             <NavLink to="/library" className={navClass}>
               Library
             </NavLink>
@@ -49,7 +52,7 @@ export function Layout() {
           </div>
         </div>
       </header>
-      <main className="mx-auto max-w-5xl px-4 py-8">
+      <main className="mx-auto max-w-6xl px-4 py-8">
         <Outlet />
       </main>
     </div>

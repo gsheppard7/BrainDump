@@ -7,7 +7,9 @@ A personal second brain. Capture notes and documents, then find them again.
   snippets that link straight to the matching passage.
 - **Ask:** questions, plans, reports, or brainstorms answered from your own notes, with
   numbered citations back to the exact passages, and "I couldn't find that" when your notes
-  don't cover it.
+  don't cover it. Every answer is saved in History so you can reopen it later.
+- **Brain:** an interactive map of your sources, linked by shared meaning — the knowledge
+  base as a growing graph.
 
 All AI runs **locally via [Ollama](https://ollama.com)** — free, and your notes never leave
 your Mac. Without Ollama, everything still works except Ask, and search falls back to

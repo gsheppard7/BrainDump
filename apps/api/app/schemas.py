@@ -87,6 +87,71 @@ class AskRequest(BaseModel):
     mode: AskMode = "recall"
 
 
+class ChatSessionSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    title: str
+    mode: AskMode
+    created_at: datetime
+    updated_at: datetime
+
+
+class ChatMessageOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    role: Literal["user", "assistant"]
+    content: str
+    citations: list[int] | None
+    passages: list[dict] | None
+    grounded: bool | None
+    model: str | None
+    notice: str | None
+    error_message: str | None
+    created_at: datetime
+
+
+class ChatSessionDetail(ChatSessionSummary):
+    messages: list[ChatMessageOut]
+
+
+class ChatSessionList(BaseModel):
+    items: list[ChatSessionSummary]
+    total: int
+
+
+class GraphNodeOut(BaseModel):
+    id: uuid.UUID
+    title: str
+    kind: SourceKind
+    file_type: FileType | None
+    char_count: int
+    chunk_count: int
+    created_at: datetime
+    embedding_status: EmbeddingStatus | None
+
+
+class GraphEdgeOut(BaseModel):
+    source: uuid.UUID
+    target: uuid.UUID
+    weight: float
+
+
+class GraphStats(BaseModel):
+    sources: int
+    connections: int
+    indexed: int
+    pending: int
+    min_similarity: float
+
+
+class GraphResponse(BaseModel):
+    nodes: list[GraphNodeOut]
+    edges: list[GraphEdgeOut]
+    stats: GraphStats
+
+
 class Capabilities(BaseModel):
     keyword_search: bool
     semantic_search: bool
